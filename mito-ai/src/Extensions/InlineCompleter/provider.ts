@@ -207,7 +207,12 @@ export class MitoAIInlineCompleter
         );
       }
 
-      return { items: result.items };
+      return {
+        items: result.items.map(item => ({
+          ...item,
+          insertText: this._cleanCompletion(item.insertText)
+        }))
+      };
     } finally {
       this._completionLock.resolve();
     }
@@ -392,17 +397,7 @@ interactive outputs.`
     this._fullCompletionMap.set(this._currentStream, fullCompletion);
 
     // Clean suggestion
-    let cleanedCompletion = fullCompletion.slice(0);
-    if (this._currentPrefix) {
-      if (
-        cleanedCompletion.startsWith(this._currentPrefix) ||
-        this._currentPrefix.startsWith(cleanedCompletion)
-      ) {
-        cleanedCompletion = cleanedCompletion.slice(this._currentPrefix.length);
-      } else if (!['\n', ' '].includes(cleanedCompletion[0])) {
-        cleanedCompletion = '\n' + cleanedCompletion;
-      }
-    }
+    let cleanedCompletion = this._cleanCompletion(fullCompletion.slice(0));
 
     this._currentStream.emit({
       done: chunk.done,
@@ -416,6 +411,21 @@ interactive outputs.`
       },
       type: chunk.type
     });
+  }
+
+  private _cleanCompletion(rawCompletion: string) {
+    let cleanedCompletion = rawCompletion;
+    if (this._currentPrefix) {
+      if (
+        cleanedCompletion.startsWith(this._currentPrefix) ||
+        this._currentPrefix.startsWith(cleanedCompletion)
+      ) {
+        cleanedCompletion = cleanedCompletion.slice(this._currentPrefix.length);
+      } else if (!['\n', ' '].includes(cleanedCompletion[0])) {
+        cleanedCompletion = '\n' + cleanedCompletion;
+      }
+    }
+    return cleanedCompletion;
   }
 
   private _resetCurrentStream() {

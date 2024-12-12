@@ -8,6 +8,7 @@ from openai.types.chat import ChatCompletionChunk
 from traitlets import CFloat, CInt, Unicode, default
 from traitlets.config import LoggingConfigurable
 
+from .logger import get_logger
 from .models import (
     CompletionError,
     CompletionItem,
@@ -60,7 +61,7 @@ class OpenAIProvider(LoggingConfigurable):
     )
 
     def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+        super().__init__(log=get_logger(), **kwargs)
         self._client: Optional[AsyncOpenAI] = None
 
     @default("api_key")
@@ -100,6 +101,7 @@ class OpenAIProvider(LoggingConfigurable):
         """
         try:
             if self.api_key:
+                self.log.debug("Requesting completion from OpenAI API with personal key.")
                 completion = await self.client.chat.completions.create(
                     model=self.model,
                     max_completion_tokens=self.max_completion_tokens,
@@ -125,7 +127,8 @@ class OpenAIProvider(LoggingConfigurable):
                             parent_id=request.message_id,
                             items=[
                                 CompletionItem(
-                                    insertText=completion.choices[0].message.content or "",
+                                    insertText=completion.choices[0].message.content
+                                    or "",
                                     isIncomplete=False,
                                 )
                             ],
@@ -142,6 +145,7 @@ class OpenAIProvider(LoggingConfigurable):
                         )
 
             else:
+                self.log.debug("Requesting completion from Mito server.")
                 global _num_usages
                 if _num_usages is None:
                     _num_usages = get_user_field(UJ_AI_MITO_API_NUM_USAGES)
