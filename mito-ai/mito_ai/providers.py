@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Optional, Union
 from openai import AsyncOpenAI
 from openai._streaming import AsyncStream
 from openai.types.chat import ChatCompletionChunk
-from traitlets import Unicode, default
+from traitlets import CFloat, CInt, Unicode, default
 from traitlets.config import LoggingConfigurable
 
 from .models import (
@@ -16,23 +16,47 @@ from .models import (
     CompletionRequest,
     CompletionStreamChunk,
 )
+from .utils.db import get_user_field, set_user_field
+from .utils.open_ai_utils import get_ai_completion_from_mito_server
+from .utils.schema import UJ_AI_MITO_API_NUM_USAGES
+from .utils.telemetry_utils import (
+    KEY_TYPE_PARAM,
+    MITO_AI_COMPLETION_ERROR,
+    MITO_AI_COMPLETION_SUCCESS,
+    MITO_SERVER_KEY,
+    MITO_SERVER_NUM_USAGES,
+    USER_KEY,
+    log,
+)
 
 __all__ = ["OpenAIProvider"]
+_num_usages = None
 
 
 class OpenAIProvider(LoggingConfigurable):
     """Provide AI feature through OpenAI services."""
-
-    # Internally it uses jinja2 template to render prompt messages.
 
     api_key = Unicode(
         config=True,
         help="OpenAI API key. Default value is read from the OPENAI_API_KEY environment variable.",
     )
 
+    max_completion_tokens = CInt(
+        None,
+        allow_none=True,
+        config=True,
+        help="An upper bound for the number of tokens that can be generated for a completion, including visible output tokens and reasoning tokens.",
+    )
+
     # FIXME add validate function to check if the model is valid
     model = Unicode(
         "gpt-4o-mini", config=True, help="OpenAI model to use for completions"
+    )
+
+    temperature = CFloat(
+        0,
+        config=True,
+        help="What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.",
     )
 
     def __init__(self, **kwargs) -> None:
@@ -74,43 +98,90 @@ class OpenAIProvider(LoggingConfigurable):
         Returns:
             The completion
         """
-        completion = await self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=100,
-            messages=request.messages,
-        )
+        try:
+            if self.api_key:
+                completion = await self.client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=self.max_completion_tokens,
+                    messages=request.messages,
+                    temperature=self.temperature,
+                )
+                # Log the successful completion
+                log(MITO_AI_COMPLETION_SUCCESS, params={KEY_TYPE_PARAM: USER_KEY})
 
-        if len(completion.choices) == 0:
-            return CompletionReply(
-                items=[],
-                parent_id=request.message_id,
-                error=CompletionError(
-                    type="NoCompletion",
-                    title="No completion returned from the OpenAI API.",
-                    traceback="",
-                ),
-            )
+                if len(completion.choices) == 0:
+                    return CompletionReply(
+                        items=[],
+                        parent_id=request.message_id,
+                        error=CompletionError(
+                            type="NoCompletion",
+                            title="No completion returned from the OpenAI API.",
+                            traceback="",
+                        ),
+                    )
+                else:
+                    try:
+                        return CompletionReply(
+                            parent_id=request.message_id,
+                            items=[
+                                CompletionItem(
+                                    insertText=completion.choices[0].message.content or "",
+                                    isIncomplete=False,
+                                )
+                            ],
+                        )
+                    except BaseException as e:
+                        return CompletionReply(
+                            items=[],
+                            parent_id=request.message_id,
+                            error=CompletionError(
+                                type=e.__class__.__name__,
+                                title=e.args[0] if e.args else "Exception",
+                                traceback=traceback.format_exc(),
+                            ),
+                        )
 
-        else:
-            try:
-                item = CompletionItem(
-                    insertText=completion.choices[0].message.content or "",
-                    isIncomplete=False,
+            else:
+                global _num_usages
+                if _num_usages is None:
+                    _num_usages = get_user_field(UJ_AI_MITO_API_NUM_USAGES)
+                # If they don't have an Open AI key, use the mito server to get a completion
+                ai_response = await get_ai_completion_from_mito_server(
+                    request.messages[-1].get("content", ""),
+                    {
+                        "model": self.model,
+                        "messages": request.messages,
+                        "temperature": self.temperature,
+                    },
+                    _num_usages or 0,
                 )
+
+                # Increment the number of usages
+                _num_usages = (_num_usages or 0) + 1
+                set_user_field(UJ_AI_MITO_API_NUM_USAGES, _num_usages)
+
+                # Log the successful completion
+                log(
+                    MITO_AI_COMPLETION_SUCCESS,
+                    params={
+                        KEY_TYPE_PARAM: MITO_SERVER_KEY,
+                        MITO_SERVER_NUM_USAGES: _num_usages,
+                    },
+                )
+
                 return CompletionReply(
-                    items=[item],
                     parent_id=request.message_id,
+                    items=[
+                        CompletionItem(
+                            insertText=ai_response,
+                            isIncomplete=False,
+                        )
+                    ],
                 )
-            except BaseException as e:
-                return CompletionReply(
-                    items=[],
-                    parent_id=request.message_id,
-                    error=CompletionError(
-                        type=e.__class__.__name__,
-                        title=e.args[0] if e.args else "Exception",
-                        traceback=traceback.format_exc(),
-                    ),
-                )
+        except BaseException as e:
+            key_type = MITO_SERVER_KEY if self.api_key is None else USER_KEY
+            log(MITO_AI_COMPLETION_ERROR, params={KEY_TYPE_PARAM: key_type}, error=e)
+            raise
 
     async def stream_completions(
         self, request: CompletionRequest
@@ -138,14 +209,22 @@ class OpenAIProvider(LoggingConfigurable):
         )
 
         # Send the completion request to the OpenAI API and returns a stream of completion chunks
-        stream: AsyncStream[
-            ChatCompletionChunk
-        ] = await self.client.chat.completions.create(
-            model=self.model,
-            stream=True,
-            max_tokens=100,
-            messages=request.messages,
-        )
+        try:
+            stream: AsyncStream[
+                ChatCompletionChunk
+            ] = await self.client.chat.completions.create(
+                model=self.model,
+                stream=True,
+                max_completion_tokens=self.max_completion_tokens,
+                messages=request.messages,
+                temperature=self.temperature,
+            )
+            # Log the successful completion
+            log(MITO_AI_COMPLETION_SUCCESS, params={KEY_TYPE_PARAM: USER_KEY})
+        except BaseException as e:
+            log(MITO_AI_COMPLETION_ERROR, params={KEY_TYPE_PARAM: USER_KEY}, error=e)
+            raise
+
         async for chunk in stream:
             try:
                 is_finished = chunk.choices[0].finish_reason is not None
