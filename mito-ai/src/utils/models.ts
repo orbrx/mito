@@ -93,7 +93,4 @@ export interface InlineCompletionStreamChunk
   response: IInlineCompletionItem;
 }
 
-export type CompleterMessage =
-  | ICompletionReply
-  | ConnectionMessage
-  | ICompletionStreamChunk;
+export type CompleterMessage = ICompletionReply | ICompletionStreamChunk;

@@ -21,12 +21,12 @@ import type OpenAI from 'openai';
 import {
   CompletionWebsocketClient,
   type ICompletionWebsocketClientOptions
-} from './client';
+} from '../../utils/client';
 import type {
   CompletionError,
   ICompletionStreamChunk,
   InlineCompletionStreamChunk
-} from './models';
+} from '../../utils/models';
 
 /**
  * Mito AI inline completer
