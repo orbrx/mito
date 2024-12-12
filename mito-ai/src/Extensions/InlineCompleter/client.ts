@@ -5,12 +5,12 @@ import { IDisposable } from '@lumino/disposable';
 import { Signal, Stream, type IStream } from '@lumino/signaling';
 import type {
   CompleterMessage,
-  InlineCompletionReply,
-  InlineCompletionRequest,
-  InlineCompletionStreamChunk
+  ICompletionReply,
+  ICompletionRequest,
+  ICompletionStreamChunk
 } from './models';
 
-const SERVICE_URL = 'mito-ai/inline-completion';
+const SERVICE_URL = 'mito-ai/chat-completions';
 
 /**
  * The instantiation options for the inline completion client.
@@ -23,7 +23,7 @@ export interface ICompletionWebsocketClientOptions {
 }
 
 /**
- * Inline completion client
+ * Mito AI completion client
  *
  * It communicates with the backend over a WebSocket to allow streaming answer.
  */
@@ -54,10 +54,8 @@ export class CompletionWebsocketClient implements IDisposable {
    * Sends a message across the WebSocket. Promise resolves to the message ID
    * when the server sends the same message back, acknowledging receipt.
    */
-  sendMessage(
-    message: InlineCompletionRequest
-  ): Promise<InlineCompletionReply> {
-    const pendingReply = new PromiseDelegate<InlineCompletionReply>();
+  sendMessage(message: ICompletionRequest): Promise<ICompletionReply> {
+    const pendingReply = new PromiseDelegate<ICompletionReply>();
     if (this._socket) {
       this._socket.send(JSON.stringify(message));
       this._pendingRepliesMap.set(message.message_id, pendingReply);
@@ -72,10 +70,7 @@ export class CompletionWebsocketClient implements IDisposable {
   /**
    * Completion chunk stream.
    */
-  get stream(): IStream<
-    CompletionWebsocketClient,
-    InlineCompletionStreamChunk
-  > {
+  get stream(): IStream<CompletionWebsocketClient, ICompletionStreamChunk> {
     return this._stream;
   }
 
@@ -176,7 +171,7 @@ export class CompletionWebsocketClient implements IDisposable {
   private _socket: WebSocket | null = null;
   private _stream = new Stream<
     CompletionWebsocketClient,
-    InlineCompletionStreamChunk
+    ICompletionStreamChunk
   >(this);
   private _ready: PromiseDelegate<void> = new PromiseDelegate<void>();
   /**
@@ -184,6 +179,6 @@ export class CompletionWebsocketClient implements IDisposable {
    */
   private _pendingRepliesMap = new Map<
     string,
-    PromiseDelegate<InlineCompletionReply>
+    PromiseDelegate<ICompletionReply>
   >();
 }

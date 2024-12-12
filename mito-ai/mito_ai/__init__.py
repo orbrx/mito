@@ -39,12 +39,14 @@ def _load_jupyter_server_extension(server_app):
     base_url = web_app.settings["base_url"]
     route_pattern = url_path_join(base_url, "mito_ai", "completion")
 
+    open_ai_provider = OpenAIProvider(config=server_app.config)
+
     handlers = [
         (route_pattern, OpenAICompletionHandler),
         (
-            url_path_join(base_url, "mito-ai", "inline-completion"),
+            url_path_join(base_url, "mito-ai", "chat-completions"),
             InlineCompletionHandler,
-            {"config": server_app.config},
+            {"llm": open_ai_provider},
         ),
     ]
     web_app.add_handlers(host_pattern, handlers)

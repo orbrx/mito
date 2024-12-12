@@ -1,48 +1,99 @@
-import type {
-  IInlineCompletionList,
-  IInlineCompletionItem
-} from '@jupyterlab/completer';
+import type { IInlineCompletionItem } from '@jupyterlab/completer';
+import type OpenAI from 'openai';
 
 export type ConnectionMessage = {
   type: 'connection';
   client_id: string;
 };
 
-export type InlineCompletionRequest = {
-  message_id: string;
-  path?: string;
-  /* The model has to complete given prefix */
-  prefix: string;
-  /* The model may consider the following suffix */
-  suffix: string;
-  mime: string;
-  /* Whether to stream the response (if streaming is supported by the model) */
-  stream: boolean;
-  language?: string;
-  cell_id?: string;
-};
-
 export type CompletionError = {
   type: string;
+  title: string;
   traceback: string;
 };
 
-export type InlineCompletionReply = {
-  type?: 'inline_completion';
-  list: IInlineCompletionList;
-  parent_id: string;
-  error?: CompletionError;
-};
+/**
+ * Mito AI completion request.
+ */
+export interface ICompletionRequest {
+  /**
+   * The type of the message.
+   */
+  type: string;
+  /**
+   * The message ID.
+   */
+  message_id: string;
+  /**
+   * The chat completion messages history.
+   */
+  messages: OpenAI.Chat.ChatCompletionMessageParam[];
+  /**
+   * Whether to stream the completion or not.
+   */
+  stream: boolean;
+}
 
-export type InlineCompletionStreamChunk = {
-  type: 'stream';
-  response: IInlineCompletionItem;
+/**
+ * Mito AI completion reply.
+ */
+export interface ICompletionReply {
+  /**
+   * The type of the message.
+   */
+  type: 'inline_completion';
+  /**
+   * Completion items.
+   */
+  items: IInlineCompletionItem[];
+  /**
+   * The parent message ID.
+   */
   parent_id: string;
-  done: boolean;
+  /**
+   * Error information.
+   */
   error?: CompletionError;
-};
+}
+
+/**
+ * Mito AI completion chunk reply
+ */
+export interface ICompletionStreamChunk {
+  /**
+   * The type of the message.
+   */
+  type: 'stream';
+  /**
+   * Completion item.
+   */
+  chunk: IInlineCompletionItem;
+  /**
+   * Whether the completion is done or not.
+   */
+  done: boolean;
+  /**
+   * The parent message ID.
+   */
+  parent_id: string;
+  /**
+   * Error information.
+   */
+  error?: CompletionError;
+}
+
+/**
+ * Inline completion stream chunk.
+ */
+export interface InlineCompletionStreamChunk
+  extends Omit<ICompletionStreamChunk, 'chunk'> {
+  /**
+   * Completion item.
+   */
+  response: IInlineCompletionItem;
+}
 
 export type CompleterMessage =
-  | InlineCompletionReply
+  | ICompletionReply
   | ConnectionMessage
-  | InlineCompletionStreamChunk;
+  | ICompletionStreamChunk;
